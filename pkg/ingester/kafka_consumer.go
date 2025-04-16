@@ -107,18 +107,18 @@ func (kc *kafkaConsumer) consume(ctx context.Context, records []partition.Record
 		maxOffset = max(maxOffset, record.Offset)
 	}
 
-	// Create a buffered channel for work distribution
-	numWorkers := min(limitWorkers, len(records))         // Calculate number of workers based on limit and number of records
-	workChan := make(chan partition.Record, len(records)) // Channel to distribute work
-	level.Debug(kc.logger).Log("msg", "consuming records", "min_offset", minOffset, "max_offset", maxOffset, "workers", numWorkers)
+	level.Debug(kc.logger).Log("msg", "consuming records", "min_offset", minOffset, "max_offset", maxOffset)
 
-	// Start worker pool
+	numWorkers := min(limitWorkers, len(records))
+	workChan := make(chan partition.Record, numWorkers)
+
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for record := range workChan {
-				stream, _, err := kc.decoder.Decode(record.Content)
+				level.Debug(kc.logger).Log("msg", "record", record)
+				stream, err := kc.decoder.DecodeWithoutLabels(record.Content)
 				if err != nil {
 					level.Error(kc.logger).Log("msg", "failed to decode record", "error", err)
 					continue
@@ -128,6 +128,8 @@ func (kc *kafkaConsumer) consume(ctx context.Context, records []partition.Record
 				req := &logproto.PushRequest{
 					Streams: []logproto.Stream{stream},
 				}
+
+				level.Debug(kc.logger).Log("msg", "pushing record", "offset", record.Offset, "length", len(record.Content))
 
 				if err := retryWithBackoff(ctx, func(attempts int) error {
 					if _, err := kc.pusher.Push(recordCtx, req); err != nil {
@@ -150,7 +152,6 @@ func (kc *kafkaConsumer) consume(ctx context.Context, records []partition.Record
 		}()
 	}
 
-	// Distribute work to workers
 	for _, record := range records {
 		workChan <- record
 	}

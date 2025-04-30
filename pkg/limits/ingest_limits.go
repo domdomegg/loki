@@ -387,6 +387,42 @@ func (s *IngestLimits) GetAssignedPartitions(_ context.Context, _ *logproto.GetA
 	return &resp, nil
 }
 
+// ExceedsLimits implements the logproto.IngestLimitsServer interface.
+// It returns the number of active streams for a tenant and the status of requested streams.
+func (s *IngestLimits) ExceedsLimits(ctx context.Context, req *logproto.ExceedsLimitsRequest) (*logproto.ExceedsLimitsResponse, error) {
+	var (
+		lastSeenAt = time.Now()
+		// Use the provided lastSeenAt timestamp as the last seen time
+		recordTime = lastSeenAt.UnixNano()
+		// Get the bucket for this timestamp using the configured interval duration
+		bucketStart = lastSeenAt.Truncate(s.cfg.BucketDuration).UnixNano()
+		// Calculate the rate window cutoff for cleaning up old buckets
+		rateWindowCutoff = lastSeenAt.Add(-s.cfg.RateWindow).UnixNano()
+
+		newStreams = make(map[int32][]Stream)
+
+		limit = uint64(1000)
+	)
+
+	for _, stream := range req.Streams {
+		partitionID := int32(stream.StreamHash % uint64(s.cfg.NumPartitions))
+
+		if !s.partitionManager.Has(partitionID) {
+			continue
+		}
+
+		newStreams[partitionID] = append(newStreams[partitionID], Stream{
+			Hash:       stream.StreamHash,
+			LastSeenAt: recordTime,
+			TotalSize:  stream.EntriesSize + stream.StructuredMetadataSize,
+		})
+	}
+
+	_ = s.metadata.TryStore(req.Tenant, newStreams, limit, bucketStart, rateWindowCutoff)
+
+	return nil, nil
+}
+
 // GetStreamUsage implements the logproto.IngestLimitsServer interface.
 // It returns the number of active streams for a tenant and the status of requested streams.
 func (s *IngestLimits) GetStreamUsage(_ context.Context, req *logproto.GetStreamUsageRequest) (*logproto.GetStreamUsageResponse, error) {

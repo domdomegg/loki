@@ -80,9 +80,11 @@ message ExceedsLimitsResult {
   string reason = 2;
 }
 
-service IngestLimits {
-  rpc GetStreamUsage(GetStreamUsageRequest) returns (GetStreamUsageResponse) {}
+service IngestLimits { 
   rpc GetAssignedPartitions(GetAssignedPartitionsRequest) returns (GetAssignedPartitionsResponse) {}
+  rpc ExceedsLimits(ExceedsLimitsRequest) returns (ExceedsLimitsResponse) {}
+
+  rpc GetStreamUsage(GetStreamUsageRequest) returns (GetStreamUsageResponse) {}
 }
 
 message GetStreamUsageRequest {

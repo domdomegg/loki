@@ -11,7 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
-	limits_frontend "github.com/grafana/loki/v3/pkg/limits/frontend"
+	"github.com/grafana/loki/v3/pkg/limits"
 	limits_frontend_client "github.com/grafana/loki/v3/pkg/limits/frontend/client"
 	"github.com/grafana/loki/v3/pkg/logproto"
 )
@@ -168,9 +168,9 @@ func firstReasonForHashes(reasonsForHashes map[uint64][]string) string {
 // are defined.
 func humanizeReasonForHash(s string) string {
 	switch s {
-	case limits_frontend.ReasonExceedsMaxStreams:
+	case limits.ReasonExceedsMaxStreams:
 		return "max streams exceeded"
-	case limits_frontend.ReasonExceedsRateLimit:
+	case limits.ReasonExceedsRateLimit:
 		return "rate limit exceeded"
 	default:
 		return s

@@ -18,18 +18,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
+	"github.com/grafana/loki/v3/pkg/limits"
 	limits_client "github.com/grafana/loki/v3/pkg/limits/client"
 	"github.com/grafana/loki/v3/pkg/logproto"
-)
-
-const (
-	// ReasonExceedsMaxStreams is returned when a tenant exceeds the maximum
-	// number of active streams as per their per-tenant limit.
-	ReasonExceedsMaxStreams = "exceeds_max_streams"
-
-	// ReasonExceedsRateLimit is returned when a tenant exceeds their maximum
-	// rate limit as per their per-tenant limit.
-	ReasonExceedsRateLimit = "exceeds_rate_limit"
 )
 
 type metrics struct {
@@ -58,7 +49,7 @@ type Frontend struct {
 	cfg    Config
 	logger log.Logger
 
-	limits                  Limits
+	limits                  limits.Limits
 	rateLimiter             *limiter.RateLimiter
 	streamUsage             StreamUsageGatherer
 	assignedPartitionsCache Cache[string, *logproto.GetAssignedPartitionsResponse]
@@ -72,7 +63,7 @@ type Frontend struct {
 }
 
 // New returns a new Frontend.
-func New(cfg Config, ringName string, limitsRing ring.ReadRing, limits Limits, logger log.Logger, reg prometheus.Registerer) (*Frontend, error) {
+func New(cfg Config, ringName string, limitsRing ring.ReadRing, lims limits.Limits, logger log.Logger, reg prometheus.Registerer) (*Frontend, error) {
 	// Set up a client pool for the limits service. The frontend will use this
 	// to make RPCs that get the current stream usage to checks per-tenant limits.
 	clientPoolFactory := limits_client.NewPoolFactory(cfg.ClientConfig)
@@ -92,13 +83,13 @@ func New(cfg Config, ringName string, limitsRing ring.ReadRing, limits Limits, l
 		assignedPartitionsCache = NewTTLCache[string, *logproto.GetAssignedPartitionsResponse](cfg.AssignedPartitionsCacheTTL)
 	}
 
-	rateLimiter := limiter.NewRateLimiter(newRateLimitsAdapter(limits), cfg.RecheckPeriod)
+	rateLimiter := limiter.NewRateLimiter(limits.NewRateLimitsAdapter(lims), cfg.RecheckPeriod)
 	streamUsage := NewRingStreamUsageGatherer(limitsRing, clientPool, cfg.NumPartitions, assignedPartitionsCache, logger)
 
 	f := &Frontend{
 		cfg:                     cfg,
 		logger:                  logger,
-		limits:                  limits,
+		limits:                  lims,
 		rateLimiter:             rateLimiter,
 		streamUsage:             streamUsage,
 		assignedPartitionsCache: assignedPartitionsCache,
@@ -199,14 +190,14 @@ func (f *Frontend) ExceedsLimits(ctx context.Context, req *logproto.ExceedsLimit
 			for _, unknownStream := range resp.Response.UnknownStreams {
 				results = append(results, &logproto.ExceedsLimitsResult{
 					StreamHash: unknownStream,
-					Reason:     ReasonExceedsMaxStreams,
+					Reason:     limits.ReasonExceedsMaxStreams,
 				})
 			}
 		}
 	}
 	f.metrics.streamsExceedingLimits.WithLabelValues(
 		req.Tenant,
-		ReasonExceedsMaxStreams,
+		limits.ReasonExceedsMaxStreams,
 	).Add(float64(len(results)))
 
 	// Check if rate limits would be exceeded.
@@ -217,12 +208,12 @@ func (f *Frontend) ExceedsLimits(ctx context.Context, req *logproto.ExceedsLimit
 		for _, streamHash := range streamHashes {
 			results = append(results, &logproto.ExceedsLimitsResult{
 				StreamHash: streamHash,
-				Reason:     ReasonExceedsRateLimit,
+				Reason:     limits.ReasonExceedsRateLimit,
 			})
 		}
 		f.metrics.streamsExceedingLimits.WithLabelValues(
 			req.Tenant,
-			ReasonExceedsRateLimit,
+			limits.ReasonExceedsRateLimit,
 		).Add(float64(len(streamHashes)))
 	}
 

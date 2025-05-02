@@ -40,6 +40,7 @@ import (
 
 	"github.com/grafana/loki/v3/pkg/ingester"
 	"github.com/grafana/loki/v3/pkg/ingester/client"
+	"github.com/grafana/loki/v3/pkg/limits"
 	limits_frontend "github.com/grafana/loki/v3/pkg/limits/frontend"
 	limits_frontend_client "github.com/grafana/loki/v3/pkg/limits/frontend/client"
 	loghttp_push "github.com/grafana/loki/v3/pkg/loghttp/push"
@@ -2461,7 +2462,7 @@ func TestDistributor_PushIngestLimits(t *testing.T) {
 			Tenant: "test",
 			Results: []*logproto.ExceedsLimitsResult{{
 				StreamHash: 0x90eb45def17f924,
-				Reason:     limits_frontend.ReasonExceedsMaxStreams,
+				Reason:     limits.ReasonExceedsMaxStreams,
 			}},
 		},
 		expectedErr: "rpc error: code = Code(429) desc = request exceeded limits: max streams exceeded",
@@ -2491,7 +2492,7 @@ func TestDistributor_PushIngestLimits(t *testing.T) {
 			Tenant: "test",
 			Results: []*logproto.ExceedsLimitsResult{{
 				StreamHash: 0x90eb45def17f924,
-				Reason:     limits_frontend.ReasonExceedsRateLimit,
+				Reason:     limits.ReasonExceedsRateLimit,
 			}},
 		},
 		expectedErr: "rpc error: code = Code(429) desc = request exceeded limits: rate limit exceeded",
@@ -2531,7 +2532,7 @@ func TestDistributor_PushIngestLimits(t *testing.T) {
 			Tenant: "test",
 			Results: []*logproto.ExceedsLimitsResult{{
 				StreamHash: 1,
-				Reason:     limits_frontend.ReasonExceedsMaxStreams,
+				Reason:     limits.ReasonExceedsMaxStreams,
 			}},
 		},
 	}, {
@@ -2561,7 +2562,7 @@ func TestDistributor_PushIngestLimits(t *testing.T) {
 			Tenant: "test",
 			Results: []*logproto.ExceedsLimitsResult{{
 				StreamHash: 1,
-				Reason:     limits_frontend.ReasonExceedsMaxStreams,
+				Reason:     limits.ReasonExceedsMaxStreams,
 			}},
 		},
 	}, {
@@ -2681,7 +2682,7 @@ func TestDistributor_SkipMetadataHashes(t *testing.T) {
 			Tenant: "test",
 			Results: []*logproto.ExceedsLimitsResult{{
 				StreamHash: 0x90eb45def17f924,
-				Reason:     limits_frontend.ReasonExceedsMaxStreams,
+				Reason:     limits.ReasonExceedsMaxStreams,
 			}},
 		},
 		expectedMetadataRecords: 0,
@@ -2703,7 +2704,7 @@ func TestDistributor_SkipMetadataHashes(t *testing.T) {
 			Tenant: "test",
 			Results: []*logproto.ExceedsLimitsResult{{
 				StreamHash: 0x90eb45def17f924,
-				Reason:     limits_frontend.ReasonExceedsRateLimit,
+				Reason:     limits.ReasonExceedsRateLimit,
 			}},
 		},
 		expectedMetadataRecords: 0,
@@ -2731,7 +2732,7 @@ func TestDistributor_SkipMetadataHashes(t *testing.T) {
 			Tenant: "test",
 			Results: []*logproto.ExceedsLimitsResult{{
 				StreamHash: 0x90eb45def17f924,
-				Reason:     limits_frontend.ReasonExceedsMaxStreams,
+				Reason:     limits.ReasonExceedsMaxStreams,
 			}},
 		},
 		// Metadata should be written for just the accepted stream(s).
@@ -2754,7 +2755,7 @@ func TestDistributor_SkipMetadataHashes(t *testing.T) {
 			Tenant: "test",
 			Results: []*logproto.ExceedsLimitsResult{{
 				StreamHash: 0x90eb45def17f924,
-				Reason:     limits_frontend.ReasonExceedsMaxStreams,
+				Reason:     limits.ReasonExceedsMaxStreams,
 			}},
 		},
 		// In dry-run mode, streams that are "dropped" should not be pushed

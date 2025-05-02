@@ -13,22 +13,24 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
+	"github.com/grafana/loki/v3/pkg/limits"
+	"github.com/grafana/loki/v3/pkg/limits/internal/testutil"
 	"github.com/grafana/loki/v3/pkg/logproto"
 )
 
 func TestFrontend_ServeHTTP(t *testing.T) {
 	tests := []struct {
 		name                          string
-		limits                        Limits
+		limits                        limits.Limits
 		expectedGetStreamUsageRequest *GetStreamUsageRequest
 		getStreamUsageResponses       []GetStreamUsageResponse
 		request                       httpExceedsLimitsRequest
 		expected                      httpExceedsLimitsResponse
 	}{{
 		name: "within limits",
-		limits: &mockLimits{
-			maxGlobalStreams: 1,
-			ingestionRate:    100,
+		limits: &testutil.MockLimits{
+			MaxGlobalStreams: 1,
+			IngestionRate:    100,
 		},
 		expectedGetStreamUsageRequest: &GetStreamUsageRequest{
 			Tenant:       "test",
@@ -48,9 +50,9 @@ func TestFrontend_ServeHTTP(t *testing.T) {
 		// expected should be default value.
 	}, {
 		name: "exceeds limits",
-		limits: &mockLimits{
-			maxGlobalStreams: 1,
-			ingestionRate:    100,
+		limits: &testutil.MockLimits{
+			MaxGlobalStreams: 1,
+			IngestionRate:    100,
 		},
 		expectedGetStreamUsageRequest: &GetStreamUsageRequest{
 			Tenant:       "test",
@@ -79,7 +81,7 @@ func TestFrontend_ServeHTTP(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			f := Frontend{
 				limits:      test.limits,
-				rateLimiter: limiter.NewRateLimiter(newRateLimitsAdapter(test.limits), time.Second),
+				rateLimiter: limiter.NewRateLimiter(limits.NewRateLimitsAdapter(test.limits), time.Second),
 				streamUsage: &mockStreamUsageGatherer{
 					t:               t,
 					expectedRequest: test.expectedGetStreamUsageRequest,

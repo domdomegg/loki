@@ -12,6 +12,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
+	"github.com/grafana/loki/v3/pkg/limits"
+	"github.com/grafana/loki/v3/pkg/limits/internal/testutil"
 	"github.com/grafana/loki/v3/pkg/logproto"
 )
 
@@ -110,8 +112,8 @@ func TestFrontend_ExceedsLimits(t *testing.T) {
 		maxGlobalStreams: 5,
 		ingestionRate:    100,
 		expected: []*logproto.ExceedsLimitsResult{
-			{StreamHash: 0x1, Reason: ReasonExceedsMaxStreams},
-			{StreamHash: 0x2, Reason: ReasonExceedsMaxStreams},
+			{StreamHash: 0x1, Reason: limits.ReasonExceedsMaxStreams},
+			{StreamHash: 0x2, Reason: limits.ReasonExceedsMaxStreams},
 		},
 	}, {
 		name: "exceeds max streams limit, allows existing streams and returns the new streams",
@@ -146,8 +148,8 @@ func TestFrontend_ExceedsLimits(t *testing.T) {
 		maxGlobalStreams: 5,
 		ingestionRate:    100,
 		expected: []*logproto.ExceedsLimitsResult{
-			{StreamHash: 6, Reason: ReasonExceedsMaxStreams},
-			{StreamHash: 7, Reason: ReasonExceedsMaxStreams},
+			{StreamHash: 6, Reason: limits.ReasonExceedsMaxStreams},
+			{StreamHash: 7, Reason: limits.ReasonExceedsMaxStreams},
 		},
 	}, {
 		// This test checks the case where a tenant's streams are sharded over
@@ -200,7 +202,7 @@ func TestFrontend_ExceedsLimits(t *testing.T) {
 		maxGlobalStreams: 1,
 		ingestionRate:    100,
 		expected: []*logproto.ExceedsLimitsResult{
-			{StreamHash: 0x1, Reason: ReasonExceedsMaxStreams},
+			{StreamHash: 0x1, Reason: limits.ReasonExceedsMaxStreams},
 		},
 	}, {
 		name: "exceeds rate limits, returns all streams",
@@ -229,8 +231,8 @@ func TestFrontend_ExceedsLimits(t *testing.T) {
 		maxGlobalStreams: 10,
 		ingestionRate:    100,
 		expected: []*logproto.ExceedsLimitsResult{
-			{StreamHash: 1, Reason: ReasonExceedsRateLimit},
-			{StreamHash: 2, Reason: ReasonExceedsRateLimit},
+			{StreamHash: 1, Reason: limits.ReasonExceedsRateLimit},
+			{StreamHash: 2, Reason: limits.ReasonExceedsRateLimit},
 		},
 	}, {
 		name: "exceeds rate limits, rates sharded over two instances",
@@ -272,8 +274,8 @@ func TestFrontend_ExceedsLimits(t *testing.T) {
 		maxGlobalStreams: 10,
 		ingestionRate:    100,
 		expected: []*logproto.ExceedsLimitsResult{
-			{StreamHash: 1, Reason: ReasonExceedsRateLimit},
-			{StreamHash: 2, Reason: ReasonExceedsRateLimit},
+			{StreamHash: 1, Reason: limits.ReasonExceedsRateLimit},
+			{StreamHash: 2, Reason: limits.ReasonExceedsRateLimit},
 		},
 	}, {
 		name: "exceeds both max stream limit and rate limits",
@@ -303,10 +305,10 @@ func TestFrontend_ExceedsLimits(t *testing.T) {
 		maxGlobalStreams: 5,
 		ingestionRate:    100,
 		expected: []*logproto.ExceedsLimitsResult{
-			{StreamHash: 0x6, Reason: ReasonExceedsMaxStreams},
-			{StreamHash: 0x7, Reason: ReasonExceedsMaxStreams},
-			{StreamHash: 0x6, Reason: ReasonExceedsRateLimit},
-			{StreamHash: 0x7, Reason: ReasonExceedsRateLimit},
+			{StreamHash: 0x6, Reason: limits.ReasonExceedsMaxStreams},
+			{StreamHash: 0x7, Reason: limits.ReasonExceedsMaxStreams},
+			{StreamHash: 0x6, Reason: limits.ReasonExceedsRateLimit},
+			{StreamHash: 0x7, Reason: limits.ReasonExceedsRateLimit},
 		},
 	}}
 
@@ -330,11 +332,11 @@ func TestFrontend_ExceedsLimits(t *testing.T) {
 
 			// Set up the mocked ring and client pool for the tests.
 			readRing, clientPool := newMockRingWithClientPool(t, "test", mockClients, instances)
-			l := &mockLimits{
-				maxGlobalStreams: test.maxGlobalStreams,
-				ingestionRate:    test.ingestionRate,
+			l := &testutil.MockLimits{
+				MaxGlobalStreams: test.maxGlobalStreams,
+				IngestionRate:    test.ingestionRate,
 			}
-			rl := limiter.NewRateLimiter(newRateLimitsAdapter(l), 10*time.Second)
+			rl := limiter.NewRateLimiter(limits.NewRateLimitsAdapter(l), 10*time.Second)
 			cache := NewNopCache[string, *logproto.GetAssignedPartitionsResponse]()
 
 			f := Frontend{

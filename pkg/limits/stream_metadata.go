@@ -26,7 +26,7 @@ type StreamMetadata interface {
 
 	// TryStore tries to store the stream metadat for a specific tenant,
 	// until the limit is reached. It returns the stream hashes that were not stored.
-	TryStore(tenant string, streams map[int32][]Stream, limit uint64, bucketStart, bucketCutOff int64) []Stream
+	TryStore(tenant string, streams map[int32][]Stream, maxActiveStreams uint64, bucketStart, bucketCutOff int64) map[string][]uint64
 
 	// Store updates or creates the stream metadata for a specific tenant and partition.
 	Store(tenant string, partitionID int32, streamHash, recTotalSize uint64, recordTime, bucketStart, bucketCutOff int64)
@@ -108,76 +108,40 @@ func (s *streamMetadata) Usage(tenant string, fn UsageFunc) {
 	}
 }
 
-func (s *streamMetadata) TryStore(tenant string, streams map[int32][]Stream, limit uint64, bucketStart, bucketCutOff int64) []Stream {
+func (s *streamMetadata) TryStore(tenant string, streams map[int32][]Stream, maxActiveStreams uint64, bucketStart, bucketCutOff int64) map[string][]uint64 {
 	i := s.getStripeIdx(tenant)
 
 	s.locks[i].Lock()
 	defer s.locks[i].Unlock()
 
-	dropped := make([]Stream, 0)
+	if _, ok := s.stripes[i][tenant]; !ok {
+		s.stripes[i][tenant] = make(map[int32]map[uint64]Stream)
+	}
+
+	dropped := make(map[string][]uint64)
 	for partitionID, streams := range streams {
-		// Get the current number of active streams for this tenant and partition
-		activeStreams := len(s.stripes[i][tenant][partitionID])
+		if _, ok := s.stripes[i][tenant][partitionID]; !ok {
+			s.stripes[i][tenant][partitionID] = make(map[uint64]Stream)
+		}
 
-		// Get the maximum number of active streams that can be stored
-		remaining := int(limit) - activeStreams
+		var (
+			activeStreams = len(s.stripes[i][tenant][partitionID])
+			newStreams    = 0
+		)
 
-		// Drop streams that exceed the limit
-		dropped = append(dropped, streams[remaining:]...)
+		for _, stream := range streams {
+			if _, ok := s.stripes[i][tenant][partitionID][stream.Hash]; !ok {
+				// Count up the new stream before updating
+				newStreams++
 
-		// Store the streams that are within the limit
-		for _, stream := range streams[:remaining] {
-			// Check if the stream already exists in the metadata
-			if recorded, ok := s.stripes[i][tenant][partitionID][stream.Hash]; ok {
-				// Update total size
-				totalSize := stream.TotalSize + recorded.TotalSize
-
-				// Update or add size for the current bucket
-				updated := false
-				sb := make([]RateBucket, 0, len(stream.RateBuckets)+1)
-
-				// Only keep buckets within the rate window and update the current bucket
-				for _, bucket := range recorded.RateBuckets {
-					// Clean up buckets outside the rate window
-					if bucket.Timestamp < bucketCutOff {
-						continue
-					}
-
-					if bucket.Timestamp == bucketStart {
-						// Update existing bucket
-						sb = append(sb, RateBucket{
-							Timestamp: bucketStart,
-							Size:      bucket.Size + stream.TotalSize,
-						})
-						updated = true
-					} else {
-						// Keep other buckets within the rate window as is
-						sb = append(sb, bucket)
-					}
+				// Drop streams that exceed the limit
+				if activeStreams+newStreams > int(maxActiveStreams) {
+					dropped[ReasonExceedsMaxStreams] = append(dropped[ReasonExceedsMaxStreams], stream.Hash)
+					continue
 				}
-
-				// Add new bucket if it wasn't updated
-				if !updated {
-					sb = append(sb, RateBucket{
-						Timestamp: bucketStart,
-						Size:      stream.TotalSize,
-					})
-				}
-
-				recorded.TotalSize = totalSize
-				recorded.RateBuckets = sb
-				s.stripes[i][tenant][partitionID][stream.Hash] = recorded
-
-				continue
 			}
 
-			// Create new stream metadata with the initial interval
-			s.stripes[i][tenant][partitionID][stream.Hash] = Stream{
-				Hash:        stream.Hash,
-				LastSeenAt:  stream.LastSeenAt,
-				TotalSize:   stream.TotalSize,
-				RateBuckets: []RateBucket{{Timestamp: bucketStart, Size: stream.TotalSize}},
-			}
+			s.storeStream(i, tenant, partitionID, stream.Hash, stream.TotalSize, stream.LastSeenAt, bucketStart, bucketCutOff)
 		}
 	}
 
@@ -200,57 +164,62 @@ func (s *streamMetadata) Store(tenant string, partitionID int32, streamHash, rec
 		s.stripes[i][tenant][partitionID] = make(map[uint64]Stream)
 	}
 
-	if recorded, ok := s.stripes[i][tenant][partitionID][streamHash]; ok {
-		// Update total size
-		totalSize := recorded.TotalSize + recTotalSize
+	s.storeStream(i, tenant, partitionID, streamHash, recTotalSize, recordTime, bucketStart, bucketCutOff)
+}
 
-		// Update or add size for the current bucket
-		updated := false
-		sb := make([]RateBucket, 0, len(recorded.RateBuckets)+1)
+func (s *streamMetadata) storeStream(i int, tenant string, partitionID int32, streamHash, recTotalSize uint64, recordTime, bucketStart, bucketCutOff int64) {
+	// Check if the stream already exists in the metadata
+	recorded, ok := s.stripes[i][tenant][partitionID][streamHash]
 
-		// Only keep buckets within the rate window and update the current bucket
-		for _, bucket := range recorded.RateBuckets {
-			// Clean up buckets outside the rate window
-			if bucket.Timestamp < bucketCutOff {
-				continue
-			}
-
-			if bucket.Timestamp == bucketStart {
-				// Update existing bucket
-				sb = append(sb, RateBucket{
-					Timestamp: bucketStart,
-					Size:      bucket.Size + recTotalSize,
-				})
-				updated = true
-			} else {
-				// Keep other buckets within the rate window as is
-				sb = append(sb, bucket)
-			}
+	// Create new stream metadata with the initial interval
+	if !ok {
+		s.stripes[i][tenant][partitionID][streamHash] = Stream{
+			Hash:        streamHash,
+			LastSeenAt:  recordTime,
+			TotalSize:   recTotalSize,
+			RateBuckets: []RateBucket{{Timestamp: bucketStart, Size: recTotalSize}},
 		}
-
-		// Add new bucket if it wasn't updated
-		if !updated {
-			sb = append(sb, RateBucket{
-				Timestamp: bucketStart,
-				Size:      recTotalSize,
-			})
-		}
-
-		recorded.TotalSize = totalSize
-		recorded.RateBuckets = sb
-		recorded.LastSeenAt = recordTime
-		s.stripes[i][tenant][partitionID][streamHash] = recorded
-
 		return
 	}
 
-	// Create new stream metadata with the initial interval
-	s.stripes[i][tenant][partitionID][streamHash] = Stream{
-		Hash:        streamHash,
-		LastSeenAt:  recordTime,
-		TotalSize:   recTotalSize,
-		RateBuckets: []RateBucket{{Timestamp: bucketStart, Size: recTotalSize}},
+	// Update total size
+	totalSize := recTotalSize + recorded.TotalSize
+
+	// Update or add size for the current bucket
+	updated := false
+	sb := make([]RateBucket, 0, len(recorded.RateBuckets)+1)
+
+	// Only keep buckets within the rate window and update the current bucket
+	for _, bucket := range recorded.RateBuckets {
+		// Clean up buckets outside the rate window
+		if bucket.Timestamp < bucketCutOff {
+			continue
+		}
+
+		if bucket.Timestamp == bucketStart {
+			// Update existing bucket
+			sb = append(sb, RateBucket{
+				Timestamp: bucketStart,
+				Size:      bucket.Size + recTotalSize,
+			})
+			updated = true
+		} else {
+			// Keep other buckets within the rate window as is
+			sb = append(sb, bucket)
+		}
 	}
+
+	// Add new bucket if it wasn't updated
+	if !updated {
+		sb = append(sb, RateBucket{
+			Timestamp: bucketStart,
+			Size:      recTotalSize,
+		})
+	}
+
+	recorded.TotalSize = totalSize
+	recorded.RateBuckets = sb
+	s.stripes[i][tenant][partitionID][streamHash] = recorded
 }
 
 func (s *streamMetadata) Evict(cutoff int64) map[string]int {

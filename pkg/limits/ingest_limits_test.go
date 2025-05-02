@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/grafana/loki/v3/pkg/kafka"
+	"github.com/grafana/loki/v3/pkg/limits/internal/testutil"
 	"github.com/grafana/loki/v3/pkg/logproto"
 )
 
@@ -473,7 +474,13 @@ func TestNewIngestLimits(t *testing.T) {
 			ObservePeriod:   100 * time.Millisecond,
 		},
 	}
-	s, err := NewIngestLimits(cfg, log.NewNopLogger(), prometheus.NewRegistry())
+
+	limits := &testutil.MockLimits{
+		MaxGlobalStreams: 100,
+		IngestionRate:    1000,
+	}
+
+	s, err := NewIngestLimits(cfg, limits, log.NewNopLogger(), prometheus.NewRegistry())
 	require.NoError(t, err)
 	require.NotNil(t, s)
 	require.NotNil(t, s.client)

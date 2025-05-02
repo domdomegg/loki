@@ -104,6 +104,9 @@ type IngestLimits struct {
 	// metrics
 	metrics *metrics
 
+	// limits
+	limits Limits
+
 	// Track stream metadata
 	metadata StreamMetadata
 
@@ -121,13 +124,14 @@ func (s *IngestLimits) TransferOut(_ context.Context) error {
 
 // NewIngestLimits creates a new IngestLimits service. It initializes the metadata map and sets up a Kafka client
 // The client is configured to consume stream metadata from a dedicated topic with the metadata suffix.
-func NewIngestLimits(cfg Config, logger log.Logger, reg prometheus.Registerer) (*IngestLimits, error) {
+func NewIngestLimits(cfg Config, lims Limits, logger log.Logger, reg prometheus.Registerer) (*IngestLimits, error) {
 	var err error
 	s := &IngestLimits{
 		cfg:              cfg,
 		logger:           logger,
 		metadata:         NewStreamMetadata(cfg.NumPartitions),
 		metrics:          newMetrics(reg),
+		limits:           lims,
 		partitionManager: NewPartitionManager(logger),
 	}
 
@@ -401,7 +405,7 @@ func (s *IngestLimits) ExceedsLimits(ctx context.Context, req *logproto.ExceedsL
 
 		newStreams = make(map[int32][]Stream)
 
-		limit = uint64(1000)
+		maxActiveStreams = s.limits.MaxGlobalStreamsPerUser(req.Tenant)
 	)
 
 	for _, stream := range req.Streams {
@@ -418,9 +422,22 @@ func (s *IngestLimits) ExceedsLimits(ctx context.Context, req *logproto.ExceedsL
 		})
 	}
 
-	_ = s.metadata.TryStore(req.Tenant, newStreams, limit, bucketStart, rateWindowCutoff)
+	dropped := s.metadata.TryStore(req.Tenant, newStreams, uint64(maxActiveStreams), bucketStart, rateWindowCutoff)
 
-	return nil, nil
+	results := make([]*logproto.ExceedsLimitsResult, 0, len(dropped))
+	for reason, streamHashes := range dropped {
+		for _, streamHash := range streamHashes {
+			results = append(results, &logproto.ExceedsLimitsResult{
+				StreamHash: streamHash,
+				Reason:     reason,
+			})
+		}
+	}
+
+	return &logproto.ExceedsLimitsResponse{
+		Tenant:  req.Tenant,
+		Results: results,
+	}, nil
 }
 
 // GetStreamUsage implements the logproto.IngestLimitsServer interface.
